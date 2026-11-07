@@ -395,7 +395,7 @@ export const PredictionPage: React.FC = () => {
                   <div>
                     <div className="text-xs text-slate-500 font-medium">Estimated Drought Probability</div>
                     <div className="text-3xl font-extrabold text-slate-900 mt-0.5">
-                      {result.drought_probability.toFixed(1)}%
+                      {result.drought_probability !== undefined ? `${result.drought_probability.toFixed(1)}%` : 'N/A'}
                     </div>
                   </div>
                   <div className="text-right space-y-1.5">

@@ -143,7 +143,9 @@ export const OverviewPage: React.FC = () => {
               <Activity className="w-4 h-4 text-emerald-700" />
             </div>
             <div className="text-2xl font-bold text-slate-900 tracking-tight">
-              {latestPred ? `${latestPred.drought_probability.toFixed(1)}%` : '42.5%'}
+              {latestPred && latestPred.drought_probability !== undefined
+                ? `${latestPred.drought_probability.toFixed(1)}%`
+                : 'N/A'}
             </div>
           </div>
           <div className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-slate-500 flex items-center justify-between">
@@ -425,7 +427,7 @@ export const OverviewPage: React.FC = () => {
                   <tr key={pred.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-3 px-3 font-semibold text-slate-900">{pred.location_name}</td>
                     <td className="py-3 px-3">{pred.prediction_date}</td>
-                    <td className="py-3 px-3 font-bold text-emerald-800">{pred.drought_probability.toFixed(1)}%</td>
+                    <td className="py-3 px-3 font-bold text-emerald-800">{pred.drought_probability !== undefined ? `${pred.drought_probability.toFixed(1)}%` : 'N/A'}</td>
                     <td className="py-3 px-3">
                       <span
                         className="px-2 py-0.5 rounded font-semibold text-[11px]"

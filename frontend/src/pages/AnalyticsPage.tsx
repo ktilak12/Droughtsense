@@ -270,7 +270,8 @@ export const AnalyticsPage: React.FC = () => {
                       {row.variable}
                     </td>
                     {correlations.variables.map((col) => {
-                      const val = row[col] as number;
+                      const rawVal = row[col];
+                      const val = typeof rawVal === 'number' && !isNaN(rawVal) ? rawVal : 0;
                       // Color scale: positive blue/green, negative red/orange
                       const bg =
                         val >= 0.7

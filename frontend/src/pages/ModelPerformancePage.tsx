@@ -308,25 +308,25 @@ export const ModelPerformancePage: React.FC = () => {
               <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                 <span className="text-[10px] text-slate-400 block font-semibold">ACCURACY</span>
                 <span className="text-base font-extrabold text-slate-900">
-                  {(modelDetail.metrics.accuracy * 100).toFixed(1)}%
+                  {modelDetail.metrics?.accuracy !== undefined ? `${(modelDetail.metrics.accuracy * 100).toFixed(1)}%` : 'N/A'}
                 </span>
               </div>
               <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                 <span className="text-[10px] text-slate-400 block font-semibold">F1-SCORE</span>
                 <span className="text-base font-extrabold text-emerald-800">
-                  {(modelDetail.metrics.f1_score * 100).toFixed(1)}%
+                  {modelDetail.metrics?.f1_score !== undefined ? `${(modelDetail.metrics.f1_score * 100).toFixed(1)}%` : 'N/A'}
                 </span>
               </div>
               <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                 <span className="text-[10px] text-slate-400 block font-semibold">PRECISION</span>
                 <span className="text-base font-extrabold text-slate-900">
-                  {(modelDetail.metrics.precision * 100).toFixed(1)}%
+                  {modelDetail.metrics?.precision !== undefined ? `${(modelDetail.metrics.precision * 100).toFixed(1)}%` : 'N/A'}
                 </span>
               </div>
               <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
                 <span className="text-[10px] text-slate-400 block font-semibold">RECALL</span>
                 <span className="text-base font-extrabold text-slate-900">
-                  {(modelDetail.metrics.recall * 100).toFixed(1)}%
+                  {modelDetail.metrics?.recall !== undefined ? `${(modelDetail.metrics.recall * 100).toFixed(1)}%` : 'N/A'}
                 </span>
               </div>
             </div>

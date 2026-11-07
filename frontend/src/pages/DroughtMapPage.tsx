@@ -128,7 +128,7 @@ export const DroughtMapPage: React.FC = () => {
                     <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100">
                       <span className="text-slate-500">Drought Probability:</span>
                       <span className="font-extrabold text-emerald-800">
-                        {station.drought_probability.toFixed(1)}%
+                        {station.drought_probability !== undefined ? `${station.drought_probability.toFixed(1)}%` : 'N/A'}
                       </span>
                     </div>
 

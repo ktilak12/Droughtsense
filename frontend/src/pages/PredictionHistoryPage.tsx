@@ -195,7 +195,7 @@ export const PredictionHistoryPage: React.FC = () => {
                     <td className="py-3 px-3 font-mono text-slate-400">#{p.id}</td>
                     <td className="py-3 px-3 font-semibold text-slate-900">{p.location_name}</td>
                     <td className="py-3 px-3">{p.prediction_date}</td>
-                    <td className="py-3 px-3 font-bold text-emerald-800">{p.drought_probability.toFixed(1)}%</td>
+                    <td className="py-3 px-3 font-bold text-emerald-800">{p.drought_probability !== undefined ? `${p.drought_probability.toFixed(1)}%` : 'N/A'}</td>
                     <td className="py-3 px-3">
                       <span
                         className="px-2 py-0.5 rounded font-semibold text-[11px]"
@@ -292,7 +292,7 @@ export const PredictionHistoryPage: React.FC = () => {
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
                 <span className="text-slate-500 block">Drought Probability</span>
                 <span className="text-2xl font-extrabold text-slate-900">
-                  {selectedItem.drought_probability.toFixed(1)}%
+                  {selectedItem.drought_probability !== undefined ? `${selectedItem.drought_probability.toFixed(1)}%` : 'N/A'}
                 </span>
               </div>
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
