@@ -27,21 +27,22 @@ async def lifespan(app: FastAPI):
             print("[DroughtSense Startup] Initializing demo hydrometeorological dataset...")
             load_demo_dataset(db=db)
             
-            # Train default Random Forest model
-            existing_models = db.query(MLModel).count()
-            if existing_models == 0:
-                print("[DroughtSense Startup] Training initial Random Forest model...")
-                try:
-                    train_model(
-                        payload=ModelTrainRequest(
-                            algorithm="Random Forest",
-                            target_type="drought_severity",
-                            test_size=0.2
-                        ),
-                        db=db
-                    )
-                except Exception as e:
-                    print(f"[DroughtSense Startup] Initial model train notice: {e}")
+        # Train default Random Forest model if no models exist and records are available
+        existing_models = db.query(MLModel).count()
+        rec_count = db.query(EnvironmentalRecord).count()
+        if existing_models == 0 and rec_count >= 20:
+            print("[DroughtSense Startup] Training initial Random Forest model...")
+            try:
+                train_model(
+                    payload=ModelTrainRequest(
+                        algorithm="Random Forest",
+                        target_type="drought_severity",
+                        test_size=0.2
+                    ),
+                    db=db
+                )
+            except Exception as e:
+                print(f"[DroughtSense Startup] Initial model train notice: {e}")
     finally:
         db.close()
     yield

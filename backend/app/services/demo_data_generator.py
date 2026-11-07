@@ -103,17 +103,25 @@ def generate_synthetic_dataset(start_year: int = 2021, end_year: int = 2025) -> 
             }
             station_rows.append(row)
 
-        # Calculate SPI-3 and SPEI-3 for the station
+        # Calculate SPI-3 and SPEI-3 for the station with scale-1 fallback for initial warmup records
         p_series = pd.Series(precip_list)
         pet_series = pd.Series(pet_list)
         spi_series, _ = DroughtIndexCalculator.calculate_spi(p_series, scale=3)
         spei_series, _ = DroughtIndexCalculator.calculate_spei(p_series, pet_series, scale=3)
+        spi_1_series, _ = DroughtIndexCalculator.calculate_spi(p_series, scale=1)
+        spei_1_series, _ = DroughtIndexCalculator.calculate_spei(p_series, pet_series, scale=1)
 
         for i in range(len(station_rows)):
-            spi_val = spi_series.iloc[i] if not pd.isna(spi_series.iloc[i]) else 0.0
-            spei_val = spei_series.iloc[i] if not pd.isna(spei_series.iloc[i]) else 0.0
-            station_rows[i]["spi"] = spi_val
-            station_rows[i]["spei"] = spei_val
+            s3 = spi_series.iloc[i] if i < len(spi_series) else np.nan
+            s1 = spi_1_series.iloc[i] if i < len(spi_1_series) else np.nan
+            spi_val = float(s3) if not pd.isna(s3) else (float(s1) if not pd.isna(s1) else 0.0)
+
+            se3 = spei_series.iloc[i] if i < len(spei_series) else np.nan
+            se1 = spei_1_series.iloc[i] if i < len(spei_1_series) else np.nan
+            spei_val = float(se3) if not pd.isna(se3) else (float(se1) if not pd.isna(se1) else 0.0)
+
+            station_rows[i]["spi"] = round(spi_val, 2)
+            station_rows[i]["spei"] = round(spei_val, 2)
             # Target severity classification based on SPI standard McKee thresholds
             station_rows[i]["severity_label"] = DroughtIndexCalculator.classify_drought_index(spi_val)
 

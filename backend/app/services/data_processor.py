@@ -48,18 +48,28 @@ class DataProcessor:
         """Intelligently map columns in uploaded dataframe to standardized fields"""
         mapping = {}
         df_cols_lower = {col: str(col).strip().lower().replace(" ", "_").replace("-", "_") for col in df.columns}
+        claimed_cols = set()
 
+        # Phase 1: Exact match prioritization
         for std_field, synonyms in cls.FIELD_SYNONYMS.items():
-            matched_col = None
             for orig_col, norm_col in df_cols_lower.items():
-                if norm_col in synonyms:
-                    matched_col = orig_col
+                if orig_col not in claimed_cols and norm_col in synonyms:
+                    mapping[std_field] = orig_col
+                    claimed_cols.add(orig_col)
                     break
-                # Partial match check
-                if any(syn in norm_col for syn in synonyms):
-                    matched_col = orig_col
-                    break
-            mapping[std_field] = matched_col
+
+        # Phase 2: Partial match fallback for unmapped fields (preventing short abbreviation collisions)
+        for std_field, synonyms in cls.FIELD_SYNONYMS.items():
+            if std_field not in mapping or mapping[std_field] is None:
+                matched_col = None
+                for orig_col, norm_col in df_cols_lower.items():
+                    if orig_col not in claimed_cols:
+                        descriptive_syns = [syn for syn in synonyms if len(syn) >= 4 and syn not in ["temp"]]
+                        if any(syn in norm_col for syn in descriptive_syns):
+                            matched_col = orig_col
+                            claimed_cols.add(orig_col)
+                            break
+                mapping[std_field] = matched_col
 
         return mapping
 
@@ -162,6 +172,28 @@ class DataProcessor:
                         warnings.append(f"Detected {outliers} extreme statistical outliers in '{field}'.")
                 else:
                     outlier_counts[field] = 0
+            else:
+                missing_values[field] = total_rows
+                outlier_counts[field] = 0
+
+        # Check temperature inversion (temp_max < temp_min)
+        t_min_col = column_mapping.get("temp_min")
+        t_max_col = column_mapping.get("temp_max")
+        if t_min_col and t_max_col and t_min_col in clean_df.columns and t_max_col in clean_df.columns:
+            inversion_mask = clean_df[t_max_col] < clean_df[t_min_col]
+            inversions = int(inversion_mask.sum())
+            if inversions > 0:
+                warnings.append(f"Found {inversions} records where max temperature < min temperature. Values swapped.")
+                temp_swap = clean_df.loc[inversion_mask, t_min_col].copy()
+                clean_df.loc[inversion_mask, t_min_col] = clean_df.loc[inversion_mask, t_max_col]
+                clean_df.loc[inversion_mask, t_max_col] = temp_swap
+
+        # Auto-impute missing temp_avg from min/max if available
+        t_avg_col = column_mapping.get("temp_avg")
+        if (not t_avg_col or t_avg_col not in clean_df.columns) and t_min_col and t_max_col and t_min_col in clean_df.columns and t_max_col in clean_df.columns:
+            clean_df["temp_avg"] = (clean_df[t_min_col] + clean_df[t_max_col]) / 2.0
+            column_mapping["temp_avg"] = "temp_avg"
+            missing_values["temp_avg"] = int(clean_df["temp_avg"].isna().sum())
 
         # Drop invalid dates and duplicates for processed dataset
         clean_df = clean_df.dropna(subset=['standard_date'])

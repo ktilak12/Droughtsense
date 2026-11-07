@@ -41,7 +41,7 @@ def create_prediction(payload: ManualPredictionRequest, db: Session = Depends(ge
     # Find active model
     active_model = db.query(MLModel).filter(MLModel.is_active == True).first()
     
-    if active_model and active_model.artifact_path:
+    if active_model and active_model.artifact_path and os.path.exists(active_model.artifact_path):
         try:
             drought_prob, severity, ml_explanation = DroughtMLPipeline.predict_single(
                 active_model.artifact_path, input_dict
@@ -283,10 +283,10 @@ def batch_predict_dataset(dataset_id: int, db: Session = Depends(get_db)):
 
     predictions_created = []
     now = datetime.now(timezone.utc)
+    locations_dict = {loc.id: loc.name for loc in db.query(Location).all()}
 
     for r in records:
-        loc = db.query(Location).filter(Location.id == r.location_id).first()
-        loc_name = loc.name if loc else "Station"
+        loc_name = locations_dict.get(r.location_id, "Station")
 
         input_dict = {
             "rainfall": r.rainfall,

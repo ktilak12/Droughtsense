@@ -119,11 +119,12 @@ def get_correlation_matrix(db: Session = Depends(get_db)):
     if len(records) < 5:
         return {"variables": [], "matrix": []}
 
-    df = pd.DataFrame(records, columns=[
+    cols = [
         "Rainfall", "Temperature", "Humidity", "Wind Speed",
         "Soil Moisture", "Streamflow", "PET", "SPI", "SPEI"
-    ])
-    corr = df.corr().round(2).fillna(0.0)
+    ]
+    df = pd.DataFrame(records, columns=cols).apply(pd.to_numeric, errors='coerce')
+    corr = df.corr(numeric_only=True).round(2).fillna(0.0)
 
     matrix = []
     for row_idx, row in corr.iterrows():

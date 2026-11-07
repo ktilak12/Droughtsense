@@ -200,9 +200,12 @@ def process_dataset(dataset_id: int, db: Session = Depends(get_db)):
         
         spi_series = pd.Series(dtype=float)
         spei_series = pd.Series(dtype=float)
+        spi_1_series = pd.Series(dtype=float)
+        spei_1_series = pd.Series(dtype=float)
 
         if len(p_series) >= 12:
             spi_series, _ = DroughtIndexCalculator.calculate_spi(p_series, scale=3)
+            spi_1_series, _ = DroughtIndexCalculator.calculate_spi(p_series, scale=1)
             # Check PET or temperature
             pet_col = mapping.get("evapotranspiration")
             if pet_col and pet_col in sorted_group.columns:
@@ -216,6 +219,7 @@ def process_dataset(dataset_id: int, db: Session = Depends(get_db)):
                     pet_series = pd.Series([50.0] * len(sorted_group), index=sorted_group.index)
             
             spei_series, _ = DroughtIndexCalculator.calculate_spei(p_series, pet_series, scale=3)
+            spei_1_series, _ = DroughtIndexCalculator.calculate_spei(p_series, pet_series, scale=1)
 
         def safe_val(col_name):
             if col_name and col_name in row:
@@ -229,10 +233,15 @@ def process_dataset(dataset_id: int, db: Session = Depends(get_db)):
             return None
 
         for idx, row in sorted_group.iterrows():
-            spi_val = spi_series.loc[idx] if idx in spi_series.index and not pd.isna(spi_series.loc[idx]) else None
-            spei_val = spei_series.loc[idx] if idx in spei_series.index and not pd.isna(spei_series.loc[idx]) else None
+            s3 = spi_series.loc[idx] if idx in spi_series.index and not pd.isna(spi_series.loc[idx]) else None
+            s1 = spi_1_series.loc[idx] if idx in spi_1_series.index and not pd.isna(spi_1_series.loc[idx]) else None
+            spi_val = s3 if s3 is not None else s1
+
+            se3 = spei_series.loc[idx] if idx in spei_series.index and not pd.isna(spei_series.loc[idx]) else None
+            se1 = spei_1_series.loc[idx] if idx in spei_1_series.index and not pd.isna(spei_1_series.loc[idx]) else None
+            spei_val = se3 if se3 is not None else se1
             
-            # Severity label
+            # Severity label derived from SPI or rainfall
             if spi_val is not None:
                 sev_label = DroughtIndexCalculator.classify_drought_index(spi_val)
             else:

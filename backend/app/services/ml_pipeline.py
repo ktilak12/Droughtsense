@@ -68,43 +68,98 @@ class DroughtMLPipeline:
         test_size: float = 0.2
     ) -> Tuple[Dict[str, Any], str]:
         """
-        Train ML model on dataframe with chronological split and no data leakage.
+        Train ML model on dataframe with chronological split and strict prevention of data leakage.
+        - Prevents target/index leakage by stripping SPI/SPEI and target labels from features.
+        - Prevents temporal & spatial cross-sectional leakage by splitting strictly across unique dates.
+        - Prevents preprocessing leakage by fitting imputer and scaler exclusively on training data.
         """
         if features is None:
             features = [f for f in cls.DEFAULT_FEATURES if f in df.columns]
 
+        # Prevent Target and Direct Index Leakage:
+        # SPI, SPEI, and target columns must NEVER be features because severity_label is derived from them.
+        leaky_columns = {target_col, "spi", "spei", "severity_label", "severity", "drought_probability"}
+        features = [f for f in features if f.lower() not in leaky_columns and f in df.columns]
+
+        if not features:
+            features = [f for f in cls.DEFAULT_FEATURES if f in df.columns]
+
         # Filter required columns and drop null targets
         train_df = df.dropna(subset=[target_col]).copy()
-        
-        # Chronological sort if date column exists
+
+        # Parse observation dates as true datetimes to ensure strictly chronological ordering
+        date_series = None
         if "observation_date" in train_df.columns:
-            train_df = train_df.sort_values(by="observation_date")
+            date_series = pd.to_datetime(train_df["observation_date"], errors='coerce')
         elif "date" in train_df.columns:
-            train_df = train_df.sort_values(by="date")
+            date_series = pd.to_datetime(train_df["date"], errors='coerce')
+
+        if date_series is not None and not date_series.isna().all():
+            train_df["_dt_sort"] = date_series
+            train_df = train_df.sort_values(by="_dt_sort").reset_index(drop=True)
+        else:
+            train_df = train_df.reset_index(drop=True)
 
         X = train_df[features].copy()
         y = train_df[target_col].copy()
 
         # Ensure target labels are valid
         valid_mask = y.isin(cls.SEVERITY_CLASSES)
-        X = X[valid_mask]
-        y = y[valid_mask]
+        X = X[valid_mask].reset_index(drop=True)
+        y = y[valid_mask].reset_index(drop=True)
+        if "_dt_sort" in train_df.columns:
+            dt_valid = train_df.loc[valid_mask, "_dt_sort"].reset_index(drop=True)
+        else:
+            dt_valid = None
 
         total_samples = len(X)
         if total_samples < 20:
             raise ValueError(f"Insufficient training samples ({total_samples}). Minimum 20 records required.")
 
-        # Chronological split (no shuffle) to represent time-series forecasting correctly
-        split_idx = int(total_samples * (1.0 - test_size))
-        X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
-        y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
+        # Temporal Split: Cut across UNIQUE dates to avoid cross-sectional same-day station leakage.
+        # When multiple stations exist, all observations before the cutoff date go to train,
+        # and all observations on or after cutoff date go to test.
+        if dt_valid is not None and dt_valid.notna().sum() > 10:
+            unique_dates = dt_valid.dropna().sort_values().unique()
+            if len(unique_dates) >= 6:
+                date_cutoff_idx = int(len(unique_dates) * (1.0 - test_size))
+                cutoff_date = unique_dates[date_cutoff_idx]
+                train_idx = dt_valid < cutoff_date
+                test_idx = dt_valid >= cutoff_date
+                
+                # Verify both splits have sufficient records
+                if train_idx.sum() >= 10 and test_idx.sum() >= 4:
+                    X_train, X_test = X[train_idx].copy(), X[test_idx].copy()
+                    y_train, y_test = y[train_idx].copy(), y[test_idx].copy()
+                else:
+                    split_idx = int(total_samples * (1.0 - test_size))
+                    X_train, X_test = X.iloc[:split_idx].copy(), X.iloc[split_idx:].copy()
+                    y_train, y_test = y.iloc[:split_idx].copy(), y.iloc[split_idx:].copy()
+            else:
+                split_idx = int(total_samples * (1.0 - test_size))
+                X_train, X_test = X.iloc[:split_idx].copy(), X.iloc[split_idx:].copy()
+                y_train, y_test = y.iloc[:split_idx].copy(), y.iloc[split_idx:].copy()
+        else:
+            split_idx = int(total_samples * (1.0 - test_size))
+            X_train, X_test = X.iloc[:split_idx].copy(), X.iloc[split_idx:].copy()
+            y_train, y_test = y.iloc[:split_idx].copy(), y.iloc[split_idx:].copy()
 
-        # Preprocessing: Impute missing features based strictly on training set
-        imputer = SimpleImputer(strategy="median")
+        # Handle all-NaN columns or non-numeric types cleanly in features
+        for col in features:
+            X_train[col] = pd.to_numeric(X_train[col], errors='coerce')
+            X_test[col] = pd.to_numeric(X_test[col], errors='coerce')
+            if X_train[col].isna().all():
+                X_train[col] = 0.0
+                X_test[col] = 0.0
+
+        # Preprocessing: Imputer strictly fit on training set only (preventing imputation leakage)
+        imputer = SimpleImputer(strategy="median", fill_value=0.0)
         X_train_imp = imputer.fit_transform(X_train)
         X_test_imp = imputer.transform(X_test)
+        X_train_imp = np.nan_to_num(X_train_imp, nan=0.0)
+        X_test_imp = np.nan_to_num(X_test_imp, nan=0.0)
 
-        # Preprocessing: Scaler fit strictly on training set
+        # Preprocessing: Scaler strictly fit on training set only (preventing scaling leakage)
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train_imp)
         X_test_scaled = scaler.transform(X_test_imp)
@@ -145,14 +200,21 @@ class DroughtMLPipeline:
         unique_classes = cls.SEVERITY_CLASSES
         cm = confusion_matrix(y_test, y_pred, labels=unique_classes).tolist()
 
-        # Multi-class AUC-ROC
+        # Multi-class AUC-ROC with correct label-to-probability mapping
         auc_roc = None
         if y_proba is not None:
             try:
-                # Present classes check
-                present_classes = list(model.classes_) if hasattr(model, "classes_") else list(range(len(unique_classes)))
-                if len(present_classes) > 1 and len(np.unique(y_test)) > 1:
-                    auc_roc = float(roc_auc_score(y_test_encoded, y_proba, multi_class="ovr", average="weighted"))
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    if "xgboost" in algorithm.lower():
+                        model_cls = list(model.classes_)
+                        if len(model_cls) > 1 and len(np.unique(y_test_encoded)) > 1:
+                            auc_roc = float(roc_auc_score(y_test_encoded, y_proba, labels=model_cls, multi_class="ovr", average="weighted"))
+                    else:
+                        model_cls = list(model.classes_)
+                        if len(model_cls) > 1 and len(np.unique(y_test)) > 1:
+                            auc_roc = float(roc_auc_score(y_test, y_proba, labels=model_cls, multi_class="ovr", average="weighted"))
             except Exception:
                 auc_roc = None
 
@@ -244,16 +306,21 @@ class DroughtMLPipeline:
         scaler = bundle["scaler"]
         classes = bundle["classes"]
 
-        # Prepare 1-row DataFrame
+        # Prepare 1-row DataFrame with robust type conversion and missing value handling
         row_data = {}
         for feat in features:
             val = input_dict.get(feat)
-            row_data[feat] = [val if val is not None else np.nan]
+            try:
+                f_val = float(val) if val is not None and not pd.isna(val) else np.nan
+            except (ValueError, TypeError):
+                f_val = np.nan
+            row_data[feat] = [f_val]
 
         df_in = pd.DataFrame(row_data)
 
-        # Impute and Scale
+        # Impute and Scale with NaN resilience
         X_imp = imputer.transform(df_in)
+        X_imp = np.nan_to_num(X_imp, nan=0.0)
         X_scaled = scaler.transform(X_imp)
 
         # Predict
@@ -263,19 +330,23 @@ class DroughtMLPipeline:
             severity = classes[int(pred_encoded)] if int(pred_encoded) < len(classes) else "Moderate"
             try:
                 proba = model.predict_proba(X_scaled)[0]
-                # Drought probability is sum of Moderate, Severe, Extreme probabilities
-                # class 0 = Normal, 1 = Moderate, 2 = Severe, 3 = Extreme
-                drought_prob = float(np.sum(proba[1:])) * 100.0 if len(proba) > 1 else (0.0 if severity == "Normal" else 80.0)
+                # Map probabilities to classes dynamically to handle arbitrary class subsets
+                model_cls = list(model.classes_) if hasattr(model, "classes_") else list(range(len(proba)))
+                drought_prob = 0.0
+                for c_idx, p in zip(model_cls, proba):
+                    c_name = classes[int(c_idx)] if int(c_idx) < len(classes) else ""
+                    if c_name in ["Moderate", "Severe", "Extreme"]:
+                        drought_prob += float(p) * 100.0
             except Exception:
                 drought_prob = 10.0 if severity == "Normal" else 75.0
         else:
             severity = str(model.predict(X_scaled)[0])
             try:
                 proba = model.predict_proba(X_scaled)[0]
-                # Match classes in model
+                # Match classes dynamically in model
                 model_classes = list(model.classes_)
                 drought_indices = [i for i, c in enumerate(model_classes) if c in ["Moderate", "Severe", "Extreme"]]
-                drought_prob = float(np.sum(proba[drought_indices])) * 100.0
+                drought_prob = float(np.sum(proba[drought_indices])) * 100.0 if drought_indices else 15.0
             except Exception:
                 # Fallback probability mapping based on severity
                 prob_map = {"Normal": 12.5, "Moderate": 48.0, "Severe": 76.5, "Extreme": 92.0}
@@ -292,13 +363,22 @@ class DroughtMLPipeline:
                 "feature": feat,
                 "importance_weight": imp,
                 "observed_value": val,
-                "impact": "Deficit drives drought risk higher" if feat in ["rainfall", "soil_moisture"] and (val is not None and val < 20) else "Elevated influence on model score"
+                "impact": "Deficit drives drought risk higher" if feat in ["rainfall", "soil_moisture"] and (val is not None and float(val or 0) < 20) else "Elevated influence on model score"
             })
+
+        conf = 85.0
+        if proba is not None and len(proba) > 0:
+            try:
+                max_p = float(np.nanmax(proba) * 100.0)
+                if not np.isnan(max_p):
+                    conf = round(max_p, 1)
+            except Exception:
+                conf = 85.0
 
         explanation = {
             "primary_factors": top_factors,
             "feature_weights": feature_importances,
-            "model_confidence": round(float(np.max(proba) * 100.0) if 'proba' in locals() and proba is not None else 85.0, 1)
+            "model_confidence": conf
         }
 
         return drought_prob, severity, explanation

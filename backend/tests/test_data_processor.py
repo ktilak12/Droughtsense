@@ -38,3 +38,18 @@ def test_data_validation_report():
     assert report["invalid_dates"] == 1
     # Check that negative rainfall was clamped to zero
     assert (clean_df["rainfall"] >= 0).all()
+
+def test_temperature_inversion_and_missing_values():
+    df = pd.DataFrame({
+        "date": ["2023-01-01", "2023-02-01"],
+        "rainfall": [20.0, 45.0],
+        "temp_min": [35.0, 20.0],  # First row inverted (min > max)
+        "temp_max": [25.0, 32.0]
+    })
+    is_valid, report, clean_df = DataProcessor.validate_dataframe(df)
+    assert is_valid is True
+    # After inversion correction, temp_max should be >= temp_min
+    assert (clean_df["temp_max"] >= clean_df["temp_min"]).all()
+    # temp_avg should be auto-derived
+    assert "temp_avg" in clean_df.columns
+    assert not clean_df["temp_avg"].isna().any()

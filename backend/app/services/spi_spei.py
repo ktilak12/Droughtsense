@@ -115,16 +115,18 @@ class DroughtIndexCalculator:
         # SciPy gamma fit: shape a (alpha), loc (fixed to 0), scale (beta)
         try:
             alpha, loc_fit, beta = stats.gamma.fit(positive_vals, floc=0)
-        except Exception as e:
+            if alpha <= 0 or beta <= 0 or np.isnan(alpha) or np.isnan(beta):
+                raise ValueError("Invalid parameters from gamma.fit")
+        except Exception:
             # Fallback to Thom's maximum likelihood estimation
-            mean_p = np.mean(positive_vals)
-            ln_mean = np.log(mean_p)
-            mean_ln = np.mean(np.log(positive_vals))
+            mean_p = float(np.mean(positive_vals))
+            ln_mean = float(np.log(max(mean_p, 1e-4)))
+            mean_ln = float(np.mean(np.log(np.maximum(positive_vals, 1e-4))))
             A = ln_mean - mean_ln
             if A <= 0:
                 A = 1e-4
             alpha = (1.0 + np.sqrt(1.0 + 4.0 * A / 3.0)) / (4.0 * A)
-            beta = mean_p / alpha
+            beta = mean_p / max(alpha, 1e-4)
 
         # Step 4: Compute cumulative probabilities H(x) = q + (1 - q) * G(x)
         spi_values = np.full_like(valid_vals, np.nan, dtype=float)
@@ -134,6 +136,8 @@ class DroughtIndexCalculator:
                 H = max(q, 1e-6)
             else:
                 G = stats.gamma.cdf(x, a=alpha, scale=beta)
+                if np.isnan(G):
+                    G = 0.5
                 H = q + (1.0 - q) * G
 
             # Clip cumulative probability to prevent +/- infinity in normal PPF
@@ -143,9 +147,11 @@ class DroughtIndexCalculator:
             # Bound standard SPI range between -3.5 and +3.5
             spi_values[i] = np.clip(z, -3.5, 3.5)
 
-        # Place back into full series with original index
+        # Place back into full series using positional indexing to avoid index misalignment
         result_series = pd.Series(index=series.index, dtype=float)
-        result_series.loc[valid_mask] = np.round(spi_values, 2)
+        valid_indices = np.where(valid_mask)[0]
+        for v_i, spi_v in zip(valid_indices, spi_values):
+            result_series.iloc[v_i] = round(float(spi_v), 2)
 
         metadata = {
             "status": "SUCCESS",
@@ -277,30 +283,47 @@ class DroughtIndexCalculator:
             }
 
         # Fit Generalized Extreme Value (GEV) distribution to D
+        probs = None
+        dist_name = "Generalized Extreme Value (GEV)"
         try:
             c, loc, scale_fit = stats.genextreme.fit(valid_vals)
-            # Compute cumulative probability F(D)
-            probs = stats.genextreme.cdf(valid_vals, c, loc=loc, scale=scale_fit)
-            dist_name = "Generalized Extreme Value (GEV)"
+            if scale_fit > 0 and not np.isnan(scale_fit):
+                probs = stats.genextreme.cdf(valid_vals, c, loc=loc, scale=scale_fit)
+                if np.isnan(probs).any() or (probs <= 0).all() or (probs >= 1).all():
+                    probs = None
         except Exception:
-            # Fallback to Pearson Type III or standard normal
+            probs = None
+
+        if probs is None:
+            # Fallback to Pearson Type III
             try:
                 skew, loc, scale_fit = stats.pearson3.fit(valid_vals)
-                probs = stats.pearson3.cdf(valid_vals, skew, loc=loc, scale=scale_fit)
-                dist_name = "Pearson Type III"
+                if scale_fit > 0 and not np.isnan(scale_fit):
+                    probs = stats.pearson3.cdf(valid_vals, skew, loc=loc, scale=scale_fit)
+                    dist_name = "Pearson Type III"
+                    if np.isnan(probs).any():
+                        probs = None
             except Exception:
-                loc = np.mean(valid_vals)
-                scale_fit = np.std(valid_vals) or 1.0
-                probs = stats.norm.cdf(valid_vals, loc=loc, scale=scale_fit)
-                dist_name = "Normal (Gaussian Empirical)"
+                probs = None
+
+        if probs is None:
+            # Fallback to Gaussian Empirical distribution
+            loc = float(np.mean(valid_vals))
+            scale_fit = float(np.std(valid_vals)) or 1.0
+            probs = stats.norm.cdf(valid_vals, loc=loc, scale=scale_fit)
+            dist_name = "Normal (Gaussian Empirical)"
 
         # Clip probabilities to avoid infinities
+        probs = np.nan_to_num(probs, nan=0.5)
         probs = np.clip(probs, 1e-6, 1.0 - 1e-6)
         spei_vals = stats.norm.ppf(probs)
         spei_vals = np.clip(spei_vals, -3.5, 3.5)
 
+        # Place back into full series using positional indexing to avoid index misalignment
         result_series = pd.Series(index=d.index, dtype=float)
-        result_series.loc[valid_mask] = np.round(spei_vals, 2)
+        valid_indices = np.where(valid_mask)[0]
+        for v_i, spei_v in zip(valid_indices, spei_vals):
+            result_series.iloc[v_i] = round(float(spei_v), 2)
 
         metadata = {
             "status": "SUCCESS",
