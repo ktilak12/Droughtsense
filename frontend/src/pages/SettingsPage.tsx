@@ -58,6 +58,32 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleResetDefaults = () => {
+    setConfig({
+      default_location: 'Anantapur Station (Semi-Arid Basin)',
+      preferred_units: 'Metric (mm, °C)',
+      default_date_range: 'Last 12 Months',
+      severity_thresholds: {
+        moderate_spi: -1.0,
+        severe_spi: -1.5,
+        extreme_spi: -2.0,
+        moderate_prob: 40.0,
+        severe_prob: 65.0,
+        extreme_prob: 85.0
+      },
+      warning_thresholds: {
+        watch_prob: 35.0,
+        warning_prob: 55.0,
+        critical_prob: 75.0
+      },
+      demo_mode_enabled: true
+    });
+    setFeedback({
+      type: 'success',
+      text: 'Reset to scientific recommended defaults. Click "Save Configuration" to apply permanently.'
+    });
+  };
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div className="pb-2 border-b border-slate-200">
@@ -284,6 +310,14 @@ export const SettingsPage: React.FC = () => {
         </div>
 
         <div className="flex justify-end space-x-3">
+          <button
+            type="button"
+            onClick={handleResetDefaults}
+            className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold shadow-2xs transition-all flex items-center space-x-2 cursor-pointer"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset to Defaults</span>
+          </button>
           <button
             type="submit"
             disabled={saving}
