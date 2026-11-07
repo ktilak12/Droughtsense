@@ -234,6 +234,18 @@ def get_prediction_detail(prediction_id: int, db: Session = Depends(get_db)):
         "created_timestamp": r.created_timestamp.isoformat()
     }
 
+@router.delete("/{prediction_id}")
+def delete_prediction(prediction_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a specific prediction audit record.
+    """
+    r = db.query(PredictionRecord).filter(PredictionRecord.id == prediction_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Prediction record not found")
+    db.delete(r)
+    db.commit()
+    return {"status": "SUCCESS", "message": f"Prediction record #{prediction_id} deleted."}
+
 @router.get("/export/csv")
 def export_predictions_csv(db: Session = Depends(get_db)):
     """

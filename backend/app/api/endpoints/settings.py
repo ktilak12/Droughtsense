@@ -44,7 +44,9 @@ def get_settings(db: Session = Depends(get_db)):
         return SettingsPayload(**DEFAULT_CONFIG)
 
     data = json.loads(setting_row.setting_value_json)
-    return SettingsPayload(**data)
+    merged_config = DEFAULT_CONFIG.copy()
+    merged_config.update(data)
+    return SettingsPayload(**merged_config)
 
 @router.put("", response_model=SettingsPayload)
 def update_settings(payload: SettingsPayload, db: Session = Depends(get_db)):

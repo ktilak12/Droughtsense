@@ -170,3 +170,23 @@ def activate_model(model_id: int, db: Session = Depends(get_db)):
         "status": "SUCCESS",
         "message": f"Activated '{target_model.model_name}' ({target_model.version}) as primary prediction model."
     }
+
+@router.delete("/{model_id}")
+def delete_model(model_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a trained machine learning model and remove its serialized artifact file.
+    """
+    import os
+    target_model = db.query(MLModel).filter(MLModel.id == model_id).first()
+    if not target_model:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    if target_model.artifact_path and os.path.exists(target_model.artifact_path):
+        try:
+            os.remove(target_model.artifact_path)
+        except Exception:
+            pass
+
+    db.delete(target_model)
+    db.commit()
+    return {"status": "SUCCESS", "message": f"Model '{target_model.model_name}' deleted."}
