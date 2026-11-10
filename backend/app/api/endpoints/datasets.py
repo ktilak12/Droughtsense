@@ -22,12 +22,13 @@ async def upload_dataset(
     source_information: str = Form("Manual Upload"),
     db: Session = Depends(get_db)
 ):
-    filename = file.filename
-    if not filename.endswith(('.csv', '.xlsx', '.xls')):
+    raw_filename = file.filename or "dataset.csv"
+    clean_filename = os.path.basename(raw_filename).strip()
+    if not clean_filename.lower().endswith(('.csv', '.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Only CSV and Excel (.xlsx, .xls) files are supported.")
 
     # Safe destination path
-    safe_filename = os.path.basename(filename)
+    safe_filename = clean_filename
     file_path = os.path.join(settings.UPLOAD_DIR, safe_filename)
 
     with open(file_path, "wb") as buffer:
@@ -35,7 +36,7 @@ async def upload_dataset(
 
     # Read dataframe
     try:
-        if filename.endswith('.csv'):
+        if clean_filename.lower().endswith('.csv'):
             df = pd.read_csv(file_path)
         else:
             df = pd.read_excel(file_path)
@@ -60,7 +61,7 @@ async def upload_dataset(
     # Create dataset record
     dataset = Dataset(
         name=safe_filename,
-        file_type="CSV" if filename.endswith('.csv') else "Excel",
+        file_type="CSV" if clean_filename.lower().endswith('.csv') else "Excel",
         row_count=len(df),
         date_range_start=start_date,
         date_range_end=end_date,
@@ -156,8 +157,12 @@ def process_dataset(dataset_id: int, db: Session = Depends(get_db)):
     # Process grouped by location for accurate SPI calculation
     records_to_insert = []
     
-    # If location column exists, group by it, otherwise treat all rows as 1 location
-    groups = clean_df.groupby(clean_df[loc_col]) if loc_col and loc_col in clean_df.columns else [("Primary Monitoring Station", clean_df)]
+    # If location column exists, fill missing values and group by it, otherwise treat all rows as 1 location
+    if loc_col and loc_col in clean_df.columns:
+        clean_df[loc_col] = clean_df[loc_col].fillna("Primary Monitoring Station").astype(str)
+        groups = clean_df.groupby(clean_df[loc_col])
+    else:
+        groups = [("Primary Monitoring Station", clean_df)]
 
     for loc_name, group_df in groups:
         # Find or create location in DB
@@ -290,6 +295,8 @@ def delete_dataset(dataset_id: int, db: Session = Depends(get_db)):
         except Exception:
             pass
 
+    # Explicitly cascade deletion of associated environmental records
+    db.query(EnvironmentalRecord).filter(EnvironmentalRecord.dataset_id == dataset.id).delete()
     db.delete(dataset)
     db.commit()
     return {"status": "SUCCESS", "message": f"Dataset '{dataset.name}' and all associated records deleted."}

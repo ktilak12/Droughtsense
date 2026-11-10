@@ -187,6 +187,8 @@ def delete_model(model_id: int, db: Session = Depends(get_db)):
         except Exception:
             pass
 
+    # Explicitly cascade deletion of associated training runs
+    db.query(TrainingRun).filter(TrainingRun.model_id == model_id).delete()
     db.delete(target_model)
     db.commit()
     return {"status": "SUCCESS", "message": f"Model '{target_model.model_name}' deleted."}
