@@ -6,7 +6,7 @@ import os
 from app.core.config import settings
 from app.core.database import engine, Base, SessionLocal
 from app.api.router import api_router
-from app.models.db_models import Location, Dataset, MLModel
+from app.models.db_models import Location, Dataset, MLModel, EnvironmentalRecord
 from app.api.endpoints.datasets import load_demo_dataset
 from app.schemas.schemas import ModelTrainRequest
 from app.api.endpoints.models import train_model
