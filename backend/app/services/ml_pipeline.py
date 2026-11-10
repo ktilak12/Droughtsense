@@ -357,13 +357,22 @@ class DroughtMLPipeline:
         # Generate factor explanations
         feature_importances = bundle.get("feature_importance", {})
         top_factors = []
+
+        def is_low_deficit(feat_name, f_val):
+            if feat_name in ["rainfall", "soil_moisture"] and f_val is not None:
+                try:
+                    return float(f_val) < 20.0
+                except (ValueError, TypeError):
+                    return False
+            return False
+
         for feat, imp in sorted(feature_importances.items(), key=lambda x: x[1], reverse=True)[:3]:
             val = input_dict.get(feat)
             top_factors.append({
                 "feature": feat,
                 "importance_weight": imp,
                 "observed_value": val,
-                "impact": "Deficit drives drought risk higher" if feat in ["rainfall", "soil_moisture"] and (val is not None and float(val or 0) < 20) else "Elevated influence on model score"
+                "impact": "Deficit drives drought risk higher" if is_low_deficit(feat, val) else "Elevated influence on model score"
             })
 
         conf = 85.0

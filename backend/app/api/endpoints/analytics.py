@@ -8,6 +8,7 @@ from sqlalchemy import func
 from app.core.database import get_db
 from app.models.db_models import EnvironmentalRecord, Location, PredictionRecord, MLModel
 from app.services.early_warning import EarlyWarningEngine
+from app.services.spi_spei import DroughtIndexCalculator
 
 router = APIRouter()
 
@@ -65,39 +66,85 @@ def get_environmental_trends(
     limit: int = Query(60, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
-    query = db.query(EnvironmentalRecord).join(Location)
+    if not location_id and (not location_name or location_name == "All"):
+        # Aggregate across all stations by date to provide a clean non-duplicated temporal trend
+        agg_query = (
+            db.query(
+                EnvironmentalRecord.observation_date.label("date"),
+                func.avg(EnvironmentalRecord.rainfall).label("rainfall"),
+                func.avg(EnvironmentalRecord.temp_avg).label("temp_avg"),
+                func.avg(EnvironmentalRecord.temp_min).label("temp_min"),
+                func.avg(EnvironmentalRecord.temp_max).label("temp_max"),
+                func.avg(EnvironmentalRecord.humidity).label("humidity"),
+                func.avg(EnvironmentalRecord.wind_speed).label("wind_speed"),
+                func.avg(EnvironmentalRecord.soil_moisture).label("soil_moisture"),
+                func.avg(EnvironmentalRecord.streamflow).label("streamflow"),
+                func.avg(EnvironmentalRecord.evapotranspiration).label("evapotranspiration"),
+                func.avg(EnvironmentalRecord.spi).label("spi"),
+                func.avg(EnvironmentalRecord.spei).label("spei")
+            )
+            .group_by(EnvironmentalRecord.observation_date)
+        )
+        if start_date:
+            agg_query = agg_query.filter(EnvironmentalRecord.observation_date >= start_date)
+        if end_date:
+            agg_query = agg_query.filter(EnvironmentalRecord.observation_date <= end_date)
 
-    if location_id:
-        query = query.filter(EnvironmentalRecord.location_id == location_id)
-    elif location_name and location_name != "All":
-        query = query.filter(Location.name == location_name)
+        records = agg_query.order_by(EnvironmentalRecord.observation_date.asc()).limit(limit).all()
 
-    if start_date:
-        query = query.filter(EnvironmentalRecord.observation_date >= start_date)
-    if end_date:
-        query = query.filter(EnvironmentalRecord.observation_date <= end_date)
+        trends = []
+        for r in records:
+            spi_val = round(float(r.spi), 2) if r.spi is not None else None
+            trends.append({
+                "date": r.date,
+                "rainfall": round(float(r.rainfall), 1) if r.rainfall is not None else None,
+                "temp_avg": round(float(r.temp_avg), 1) if r.temp_avg is not None else None,
+                "temp_min": round(float(r.temp_min), 1) if r.temp_min is not None else None,
+                "temp_max": round(float(r.temp_max), 1) if r.temp_max is not None else None,
+                "humidity": round(float(r.humidity), 1) if r.humidity is not None else None,
+                "wind_speed": round(float(r.wind_speed), 1) if r.wind_speed is not None else None,
+                "soil_moisture": round(float(r.soil_moisture), 1) if r.soil_moisture is not None else None,
+                "streamflow": round(float(r.streamflow), 1) if r.streamflow is not None else None,
+                "evapotranspiration": round(float(r.evapotranspiration), 1) if r.evapotranspiration is not None else None,
+                "spi": spi_val,
+                "spei": round(float(r.spei), 2) if r.spei is not None else None,
+                "severity": DroughtIndexCalculator.classify_drought_index(spi_val) if spi_val is not None else "Normal"
+            })
+        return trends
+    else:
+        query = db.query(EnvironmentalRecord).join(Location)
 
-    records = query.order_by(EnvironmentalRecord.observation_date.asc()).limit(limit).all()
+        if location_id:
+            query = query.filter(EnvironmentalRecord.location_id == location_id)
+        elif location_name and location_name != "All":
+            query = query.filter(Location.name == location_name)
 
-    trends = []
-    for r in records:
-        trends.append({
-            "date": r.observation_date,
-            "rainfall": r.rainfall,
-            "temp_avg": r.temp_avg,
-            "temp_min": r.temp_min,
-            "temp_max": r.temp_max,
-            "humidity": r.humidity,
-            "wind_speed": r.wind_speed,
-            "soil_moisture": r.soil_moisture,
-            "streamflow": r.streamflow,
-            "evapotranspiration": r.evapotranspiration,
-            "spi": r.spi,
-            "spei": r.spei,
-            "severity": r.severity_label
-        })
+        if start_date:
+            query = query.filter(EnvironmentalRecord.observation_date >= start_date)
+        if end_date:
+            query = query.filter(EnvironmentalRecord.observation_date <= end_date)
 
-    return trends
+        records = query.order_by(EnvironmentalRecord.observation_date.asc()).limit(limit).all()
+
+        trends = []
+        for r in records:
+            trends.append({
+                "date": r.observation_date,
+                "rainfall": r.rainfall,
+                "temp_avg": r.temp_avg,
+                "temp_min": r.temp_min,
+                "temp_max": r.temp_max,
+                "humidity": r.humidity,
+                "wind_speed": r.wind_speed,
+                "soil_moisture": r.soil_moisture,
+                "streamflow": r.streamflow,
+                "evapotranspiration": r.evapotranspiration,
+                "spi": r.spi,
+                "spei": r.spei,
+                "severity": r.severity_label
+            })
+
+        return trends
 
 @router.get("/correlations")
 def get_correlation_matrix(db: Session = Depends(get_db)):

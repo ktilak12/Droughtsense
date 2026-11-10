@@ -61,17 +61,22 @@ def test_prediction_history_and_export():
     assert "text/csv" in export_response.headers["content-type"]
 
 def test_batch_prediction():
-    # Fetch existing datasets
+    # Fetch existing datasets with processed records or load demo
     ds_resp = client.get("/api/datasets")
     assert ds_resp.status_code == 200
     datasets = ds_resp.json()
-    if datasets:
-        ds_id = datasets[0]["id"]
-        resp = client.post(f"/api/predictions/batch/{ds_id}")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "SUCCESS"
-        assert "predictions_generated" in data
+    processed_ds = [d for d in datasets if d.get("processing_status") == "PROCESSED"]
+    if not processed_ds:
+        load_resp = client.post("/api/datasets/load-demo")
+        ds_id = load_resp.json().get("dataset_id")
+    else:
+        ds_id = processed_ds[0]["id"]
+
+    resp = client.post(f"/api/predictions/batch/{ds_id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "SUCCESS"
+    assert "predictions_generated" in data
 
 def test_prediction_deletion():
     # Create a prediction to delete
@@ -104,3 +109,41 @@ def test_settings_get_and_update():
     put_resp = client.put("/api/settings", json=cfg)
     assert put_resp.status_code == 200
     assert put_resp.json()["default_location"] == cfg["default_location"]
+
+def test_environmental_trends_aggregation():
+    resp_all = client.get("/api/analytics/trends?location_name=All&limit=30")
+    assert resp_all.status_code == 200
+    data = resp_all.json()
+    assert isinstance(data, list)
+    if data:
+        dates = [item["date"] for item in data]
+        # In aggregated "All" mode, each date must be unique (no duplicate dates across stations)
+        assert len(dates) == len(set(dates))
+        assert "rainfall" in data[0]
+        assert "temp_avg" in data[0]
+        assert "severity" in data[0]
+
+def test_dataset_upload_case_insensitive_and_cascade_delete():
+    import io
+    csv_content = (
+        "date,rainfall,temp_min,temp_max,temp_avg,humidity,wind_speed,soil_moisture,streamflow,evapotranspiration,location\n"
+        "2026-01-01,10.0,15.0,25.0,20.0,60.0,3.0,30.0,5.0,25.0,StationAlpha\n"
+        "2026-01-02,0.0,14.0,26.0,20.0,55.0,4.0,28.0,4.5,26.0,StationAlpha\n"
+    )
+    file_tuple = ("test_data.CSV", io.BytesIO(csv_content.encode("utf-8")), "text/csv")
+    upload_resp = client.post("/api/datasets/upload", files={"file": file_tuple})
+    assert upload_resp.status_code == 200
+    res_data = upload_resp.json()
+    assert "dataset" in res_data
+    ds_data = res_data["dataset"]
+    assert ds_data["validation_status"] in ["VALID", "WARNING"]
+    ds_id = ds_data["id"]
+
+    # Delete dataset and confirm cascade
+    del_resp = client.delete(f"/api/datasets/{ds_id}")
+    assert del_resp.status_code == 200
+    assert del_resp.json()["status"] == "SUCCESS"
+
+    # Confirm 404 on get
+    get_resp = client.get(f"/api/datasets/{ds_id}")
+    assert get_resp.status_code == 404

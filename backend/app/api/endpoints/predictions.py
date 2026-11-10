@@ -292,6 +292,8 @@ def batch_predict_dataset(dataset_id: int, db: Session = Depends(get_db)):
 
     active_model = db.query(MLModel).filter(MLModel.is_active == True).first()
     model_artifact = active_model.artifact_path if (active_model and active_model.artifact_path and os.path.exists(active_model.artifact_path)) else None
+    default_model_name = active_model.model_name if active_model else "WMO/McKee Empirical Index Engine"
+    default_model_ver = active_model.version if active_model else "v1.0-RuleFallback"
 
     predictions_created = []
     now = datetime.now(timezone.utc)
@@ -299,6 +301,8 @@ def batch_predict_dataset(dataset_id: int, db: Session = Depends(get_db)):
 
     for r in records:
         loc_name = locations_dict.get(r.location_id, "Station")
+        model_name = default_model_name
+        model_ver = default_model_ver
 
         input_dict = {
             "rainfall": r.rainfall,
